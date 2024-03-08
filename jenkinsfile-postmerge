@@ -1,0 +1,108 @@
+pipeline {
+    agent any
+    
+    stages {
+        stage('Retrieve Latest Tag') {
+            steps {
+                script {
+                    withCredentials([string(credentialsId: 'github-token-nageh', variable: 'TOKEN')]) {
+                        def pull_number = sh(script: "curl -L -k -o commitid.json -H 'Accept: application/vnd.github.v3+json' -H 'Authorization: token ${TOKEN}' https://eos2git.cec.lab.emc.com/api/v3/repos/${env.Reponame}/commits/${env.PRcommitid}/pulls", returnStdout: true)
+                        pr_number_command = "cat commitid.json | jq -r '.[].number'"
+                        def pr_number = sh(returnStdout: true, script: pr_number_command)
+                        def response = sh(script: "curl -L -o pullrequest.json -k -X GET -H 'Accept: application/vnd.github.v3+json' -H 'Authorization: token ${TOKEN}' https://eos2git.cec.lab.emc.com/api/v3/repos/${env.Reponame}/pulls/${pr_number}", returnStdout: true)
+                        sh label: '', script: '''
+                            cat pullrequest.json | jq -r '.labels[] | select(.name == "bugfix" or .name == "patch" or .name == "major" or .name == "minor") .name' > label.txt
+                        '''
+                        def pr_label = sh(returnStdout: true, script: 'cat label.txt').replaceAll("\\s", '')
+                        echo "Your label is ${pr_label}" 
+                        
+                        // Get the latest tag using git describe
+                        def latest_tag = sh(script: 'git describe --tags $(git rev-list --tags --max-count=1)', returnStdout: true).trim()
+                        echo "latest tag is ${latest_tag}"
+                        // Update the tag based on the label
+                        def tag_parts = latest_tag.split('\\.')
+                        def major = tag_parts[0]
+                        def minor = tag_parts[1]
+                        def patch = tag_parts[2]
+                        
+                        if (pr_label == "patch" || pr_label == "bugfix") {
+                            
+                            patch = patch.toInteger() + 1
+                        } else if (pr_label == "minor") {
+                        
+                            minor = minor.toInteger() + 1
+                            patch = 0
+                        } else if (pr_label == "major") {
+                        
+                            major = major.toInteger() + 1
+                            minor = 0
+                            patch = 0
+                        }
+                        
+                        env.new_tag = "${major}.${minor}.${patch}"
+                        echo "new tag is ${new_tag}"
+
+                    }
+                }
+            }
+        }
+        stage('Testing Code') {
+            steps {
+                script {
+
+                    // Run Test Case
+                    echo "Run Test Case..."
+                }
+            }
+        }
+        stage('Build New Docker Image') {
+            steps {
+                script {
+                    withCredentials([
+                        usernamePassword(credentialsId: 'nageh-cred', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')
+                    ]) {
+                        
+                        sh """
+                        ##Docker login 
+                        echo "$PASSWORD" | docker login -u "$USERNAME" --password-stdin
+                        ## Docker build 
+                        docker build -t ahmednageh08/node-app:${env.new_tag} .
+                        ## Docker Push
+                        docker push ahmednageh08/node-app:${env.new_tag}
+                        """
+                    }
+                }
+            }
+        }
+        stage('Docker Vulnarability Scanning') {
+            steps {
+                script {
+
+                    // Run Test Case
+                    echo "Run Vulnarability Scanning..."
+                }
+            }
+        }
+        stage('Update Kubernetes Dployment') {
+            steps {
+                script {
+                    sh """ 
+                        kubectl config use-context scus-mobile-pwo-dev-aks 
+                        kubectl apply -f k8s --namespace=dev
+                        kubectl set image deployment/nodejs-app-deployment nodejs-app-container=ahmednageh08/node-app:${env.new_tag} --namespace=dev 
+                    """
+                }
+            }
+        }
+        stage('Push New Tag') {
+            steps {
+                script {
+                    sh """ 
+                        git tag ${env.new_tag}
+                        git push origin ${env.new_tag}
+                    """
+                }
+            }
+        }
+    }
+}

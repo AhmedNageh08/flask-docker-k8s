@@ -1,0 +1,21 @@
+pipeline {
+    agent any
+    parameters {
+    choice(choices: ['smoke', 'qa'], description: 'Name of the Deployment_ENV you want to deploy on', name: 'Deployment_ENV')
+    string(name: 'Version', defaultValue: 'latest', description: 'Version of the app you want to deploy')
+    }
+    stages {
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    sh """ 
+                        kubectl config use-context scus-mobile-pwo-dev-aks
+                        kubectl apply -f k8s --namespace=${Deployment_ENV} 
+                        kubectl set image deployment/nodejs-app-deployment nodejs-app-container=ahmednageh08/node-app:${Version} --namespace=${Deployment_ENV} 
+                    """
+                }
+            }
+        }
+    }
+}

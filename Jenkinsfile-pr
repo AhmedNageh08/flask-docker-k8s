@@ -1,0 +1,61 @@
+def srcBranch = ghprbSourceBranch 
+pipeline {
+    agent any
+    
+    stages {
+        stage('Retrieve Source Branch') {
+            steps {
+                script {
+                    
+                    // Get the source branch from the SCM variables
+                    //def sourceBranch = scmVars.GIT_BRANCH.split('/').last()
+                    
+
+                    // Print the source branch
+                    echo "Source Branch:${srcBranch}"
+                }
+            }
+        }
+        stage('Testing Code') {
+            steps {
+                script {
+
+                    // Run Test Case
+                    echo "Run Test Case..."
+                }
+            }
+        }
+        stage('Dockerize app') {
+            steps {
+                script {
+                    withCredentials([
+                        usernamePassword(credentialsId: 'nageh-cred', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')
+                    ]) {
+                        
+                        sh """
+                        ##Docker login 
+                        echo "$PASSWORD" | docker login -u "$USERNAME" --password-stdin
+                        ## Docker build 
+                        docker build -t ahmednageh08/node-app:${srcBranch} .
+                        ## Docker Push
+                        docker push ahmednageh08/node-app:${srcBranch}
+                        """
+                    }
+                }
+            }
+        }
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    
+                    sh """ 
+                        kubectl config use-context scus-mobile-pwo-dev-aks
+                        kubectl create namespace ${srcBranch} --dry-run=client -o yaml | kubectl apply -f -
+                        kubectl apply -f k8s --namespace=${srcBranch} 
+                        kubectl set image deployment/nodejs-app-deployment nodejs-app-container=ahmednageh08/node-app:${srcBranch} --namespace=${srcBranch} 
+                    """
+                }
+            }
+        }
+    }
+}
