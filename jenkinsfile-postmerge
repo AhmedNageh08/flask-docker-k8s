@@ -87,7 +87,7 @@ pipeline {
             steps {
                 script {
                     sh """ 
-                        kubectl config use-context scus-mobile-pwo-dev-aks 
+                        kubectl config use-context ##cluster-context
                         kubectl apply -f k8s --namespace=dev
                         kubectl set image deployment/nodejs-app-deployment nodejs-app-container=ahmednageh08/node-app:${env.new_tag} --namespace=dev 
                     """
